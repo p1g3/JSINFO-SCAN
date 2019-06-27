@@ -109,8 +109,9 @@ def find_links(array_domain):
 				domain_list.append(root_domain) #global domain_list add root_domain
 				wait_process_domain_list.append(root_domain) # func_js_list add root_domain(netloc)
 				wait_process_domain_list.append(target) # func_js_list add target(add target to find_js)
-				with open(output_domains,'a+',encoding='utf-8-sig') as f:
-					f.write(root_domain+'\n')
+				if output_domains:
+					with open(output_domains,'a+',encoding='utf-8-sig') as f:
+						f.write(root_domain+'\n')
 		target = target.replace(' ：','')
 		html = send_requests(target)
 		if html:
@@ -134,8 +135,9 @@ def find_links(array_domain):
 								domain_list.append(netloc)
 								func_domain_list.append(netloc)
 								wait_process_domain_list.append(netloc)
-								with open(output_domains,'a+',encoding='utf-8-sig') as f:
-									f.write(netloc + '\n')
+								if output_domains:
+									with open(output_domains,'a+',encoding='utf-8-sig') as f:
+										f.write(netloc + '\n')
 			else:
 				continue
 	if func_domain_list:
@@ -179,8 +181,9 @@ def findjs_links(array_domain):
 							domain_list.append(netloc)
 							netloc_list.append(netloc)
 							print('[+]{} new domain find in js {}：{}'.format(time.strftime('%H:%M:%S'),_,netloc))
-							with open(output_domains,'a+',encoding='utf-8-sig') as f:
-								f.write(netloc.encode('utf-8').decode('gbk') + '\n')
+							if output_domains:
+								with open(output_domains,'a+',encoding='utf-8-sig') as f:
+									f.write(netloc.encode('utf-8').decode('gbk') + '\n')
 	#print(js_list)
 	if netloc_list:
 		#print(1)
@@ -254,8 +257,9 @@ def extract_URL(js_link_or_text,target):
 								domain_list.append(netloc)
 								func_domain_list.append(netloc)
 								print('[+]{} new domain find in extract_js {}：{}'.format(time.strftime('%H:%M:%S'),target.replace('http://','').replace('https://',''),netloc))
-								with open(output_domains,'a+',encoding='utf-8-sig') as f:
-									f.write(netloc + '\n')
+								if output_domains:
+									with open(output_domains,'a+',encoding='utf-8-sig') as f:
+										f.write(netloc + '\n')
 		else:
 			continue
 	if func_domain_list:
