@@ -15,7 +15,7 @@ def parse_args():
     parser.add_argument("-d", "--domain", help="Site you want to scarpy")
     parser.add_argument("-f", "--file", help="File of domain or target")
     parser.add_argument("--keyword", help="Keywords of domain regexp",required=True)
-    parser.add_argument("-o","--output", help="Save domains file")
+    parser.add_argument("-o","--output", help="Save domains file",required=True)
     parser.add_argument("--save", help="Save apis file",required=True)
     return parser.parse_args()
 
