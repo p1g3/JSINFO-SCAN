@@ -14,9 +14,9 @@ def parse_args():
     parser = argparse.ArgumentParser(epilog='\tExample:\npython ' + sys.argv[0] + " -d www.baidu.com --keyword baidu")
     parser.add_argument("-d", "--domain", help="Site you want to scarpy")
     parser.add_argument("-f", "--file", help="File of domain or target")
-    parser.add_argument("--keyword", help="Keywords of domain regexp")
+    parser.add_argument("--keyword", help="Keywords of domain regexp",required=True)
     parser.add_argument("-o","--output", help="Save domains file")
-    parser.add_argument("--save", help="Save apis file")
+    parser.add_argument("--save", help="Save apis file",required=True)
     return parser.parse_args()
 
 def send_requests(target):
@@ -139,10 +139,11 @@ def find_links(array_domain):
 			else:
 				continue
 	if func_domain_list:
+		find_links(func_domain_list)
+	elif wait_process_domain_list:
 		#print(func_list)
 		findjs_links(wait_process_domain_list)
 		#print(js_list)
-		find_links(func_domain_list)
 
 def findjs_links(array_domain):
 	netloc_list = list()
@@ -274,9 +275,6 @@ if __name__ == '__main__':
 	args = parse_args()
 	output_domains = args.output
 	output_apis = args.save
-	if not args.keyword:
-		print('please input your keyword of domain')
-		os._exit(0)
 	keywords = args.keyword.split(',')
 	if args.domain and args.file:
 		print('Usage：python3 {} -d www.baidu.com'.format(sys.argv[0]))
