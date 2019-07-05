@@ -61,3 +61,8 @@ python3 jsinfo.py -d jd.com --keyword jd,joybuy,360 -o jd_domains.txt --save jd_
 
 ![enter image description here](https://s2.ax1x.com/2019/06/27/Zmablj.png)
 
+### Update
+
+2019-7-5：重构代码，加入了爬行深度的设定，深度为1~2，默认为1，2即为深度爬取，同时增加了url的存储，即深度爬取爬取到的链接。
+
+
