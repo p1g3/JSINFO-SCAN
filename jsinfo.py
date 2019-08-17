@@ -1,225 +1,162 @@
 import requests,re
-import os,sys
-import argparse
-import chardet
-import time
 from threading import Thread,activeCount,Lock
-from queue import Queue
 from html import unescape
-from urllib.parse import urlparse,unquote
-#import urllib
+from queue import Queue
+from urllib.parse import urlparse
+from html import unescape
+import sys,os,chardet
+import argparse
+
+domains = list()
+wait_verify_domains = list()
+js_list = list()
+api_list = list()
+lock = Lock()
 
 requests.packages.urllib3.disable_warnings()
-
 def parse_args():
-    parser = argparse.ArgumentParser(epilog='\tExample:\npython ' + sys.argv[0] + " -d www.baidu.com --keyword baidu")
-    parser.add_argument("-d", "--domain", help="Site you want to scarpy")
-    parser.add_argument("-f", "--file", help="File of domain or target")
-    parser.add_argument("--keyword", help="Keywords of domain regexp",required=True)
-    parser.add_argument("-o","--output", help="Save domains file")
-    parser.add_argument("--max",help='max scarpy deepth')
-    parser.add_argument("--url",help="if you need max 2,input the saving url file")
-    parser.add_argument("--save", help="Save apis file")
-    return parser.parse_args()
+	parser = argparse.ArgumentParser(epilog='\tUsage:\npython ' + sys.argv[0] + " -d www.baidu.com --keyword baidu")
+	parser.add_argument("-d", "--domain", help="Site you want to scrapy")
+	parser.add_argument("-f", "--file", help="File of domain or target you want to scrapy")
+	parser.add_argument("--keyword", help="Keywords of domain regexp")
+	parser.add_argument("--save", help="Saving apis file.")
+	parser.add_argument("--savedomain", help="Saving domains file.")
+	parser.add_argument("--batch", help="Don\'t need to enter the keywords")
+	return parser.parse_args()
 
-
-class JSINFO():
-	def __init__(self,domains,keywords,output_apis,output_urls,output_domains=None,max=1):
-		self.keywords = keywords.split(',')
-		if not output_apis:
-			self.output_apis = 'output_apis.txt'
-		else:
-			self.output_apis = output_apis
-		self.domains = domains
-		self.output_urls = output_urls
-		if not self.output_urls:
-			self.output_urls = 'output_urls.txt'
-		self.urls = list()
-		self.apis = list()
-		self.finded_urls = list()
-		self.finded_js = list()
-		self.output_domains = output_domains
-		if max:
-			if max in ['1','2']:
-				self.max = int(max)
+def send_request(url):
+#	if not url.startswith(('http://','https://')):
+	#	url = 'http://' + url
+	headers = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.142 Safari/537.36'}
+	session =  requests.session()
+	session.headers = headers
+	try:
+		resp = session.get(url,timeout=(5,20),verify=False)
+	except Exception as e:
+		print('[Error]Can\'t access to {}'.format(url.strip()))
+		return
+	try:
+		encoding = resp.encoding
+		if encoding in [None,'ISO-8859-1']:
+			encodings = requests.utils.get_encodings_from_content(resp.text)
+			if encodings:
+				encoding = encodings[0]
 			else:
-				print('max scrapy deepth in 1~2')
-				os._exit(0)
-		else:
-			self.max = 1
+				encoding = resp.apparent_encoding
+		return resp.content.decode(encoding)
+	except:
+		if 'charset' not in resp.headers.get('Content-Type', " "):
+			resp.encoding = chardet.detect(resp.content).get('encoding')  # 解决网页编码问题
+		return resp.text
 
-	def scrapy_links(self,target_list):
-		func_list = list()
-		link_pattern = re.compile('href=["|\'](.*?)["|\']',re.S)
-		for target in target_list:
-			if target not in self.finded_urls:
-				self.finded_urls.append(target)
-				func_list.append(target)
-			target = self.process_target(target)
-			target_parse = urlparse(target)
-			if urlparse(target).netloc not in self.finded_js:
-				self.finded_js.append(urlparse(target).netloc)
-				self.find_js_raw(target_parse,target.replace('http://','').replace('https://',''))
-				self.find_js_raw(target_parse,target_parse.netloc)
-			if target:
-				#print(target)
-				text = self.send_requests(target)
-			else:
-				continue
-			#print(target)
-			if text:
-				links = re.findall(link_pattern,text)
-				if links:
-					for link in links:
-						if not link:continue
-						link = self.process_link(target_parse,link)
-						if link:
-							if link not in self.finded_urls:
-								self.finded_urls.append(link)
-								if self.max == 2:
-									for keyword in self.keywords:
-										if keyword in link:
-											self.urls.append(link)
-											self.finded_urls.append(link)
-											func_list.append(link)
-											if self.output_urls:
-												with open(self.output_urls,'a+',encoding='utf-8') as f:
-													f.write(link + '\n')
-											print('[+]{} Find new link by scrapy_links in {}：{}'.format(time.strftime('%H:%M:%S'),target_parse.netloc,link))
-										if not (urlparse(link).netloc == link.replace('https://','').replace('http://','')[:-1] or urlparse(link).netloc == link.replace('https://','').replace('http://','')):
-											if urlparse(link).netloc:
-												if keyword in urlparse(link).netloc:
-													if urlparse(link).netloc not in self.domains and urlparse(link).netloc.replace('www.','') not in self.domains:
-														if self.output_domains:
-															with open(self.output_domains,'a+',encoding='utf-8') as f:
-																f.write(urlparse(link).netloc + '\n')
-														print('[+]{} Find new netloc by scrapy_links in {}：{}'.format(time.strftime('%H:%M:%S'),target_parse.netloc,urlparse(link).netloc))
-														self.domains.append(urlparse(link).netloc)
-														func_list.append(urlparse(link).netloc)
-														self.finded_urls.append(urlparse(link).netloc)
-								elif self.max == 1:
-									if urlparse(link).netloc:
-										for keyword in self.keywords:
-											if keyword in urlparse(link).netloc:
-												if urlparse(link).netloc not in self.domains and urlparse(link).netloc.replace('www.','') not in self.domains:
-													if self.output_domains:
-														with open(self.output_domains,'a+',encoding='utf-8') as f:
-															f.write(urlparse(link).netloc + '\n')
-													print('[+]{} Find new netloc by scrapy_links in {}：{}'.format(time.strftime('%H:%M:%S'),target_parse.netloc,urlparse(link).netloc))
-													self.domains.append(urlparse(link).netloc)
-													func_list.append(urlparse(link).netloc)
-													self.finded_urls.append(urlparse(link).netloc)
-		if func_list:
-			#print(func_list)
-			#print(self.domains)
-			self.scrapy_links(func_list)
+def parse_href(href,url_parse):
+	if 'javascript' in href:return
+	href = unescape(href)
+	black_list = ['jpg','png','css','apk','ico','js','jpeg','exe','gif']
+	for bk in black_list:
+		if (href[-len(bk):] or href.split('?')[0][-len(bk):]) == bk:return
+	if href.startswith(('http://','https://')):return href
+	elif href.startswith('////'):
+		href = url_parse.scheme + ':' + href[2:]
+		return href
+	elif href.startswith('///'):
+		href = url_parse.scheme + ':' + href[1:]
+		return href
+	elif href.startswith('//'):
+		href = url_parse.scheme  + ':' +  href
+		return href
+	elif href.startswith('/'):
+		href = url_parse.scheme + '://' + url_parse.netloc + href
+		return href
+	else:
+		return url_parse.scheme + '://' + url_parse.netloc + url_parse.path + '/' + href
 
-	def send_requests(self,target):
-		headers = {'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Safari/537.36',
-		'cookie':r'o2Control=webp; shshshfpa=b4b40f28-27e8-970e-c22e-1fd52cf3e4c3-1561051162; shshshfpb=moqXy%2FqosMI73X4YrJvo4Pg%3D%3D; _tp=z18dhXDHoUPtjjGXWKWB2BOMGaV7%2FrPT1iyxGUs9syA%3D; _pst=jd_4a28f039b8865; user-key=7d15fb39-62d8-4086-b9bc-24a3ca1430ab; unick=jd_166895qpw; o2State={%22webp%22:true}; areaId=22; ipLoc-djd=22-1930-4284-0; pinId=xSNzjumtpYzakNtnEi1DpLV9-x-f3wj7; pin=jd_4a28f039b8865; unpl=V2_ZzNtbUcHEBYmDhNULEsOVmIFRVUSBBQUcQ5OUyseDlBgUBVZclRCFX0UR1JnGFkUZAMZXEpcRhFFCEVkexhdBWMAGlxKVXNFGwtCOngYbDVkAyJccldHEnUJQlR7Hl0GZAQVWUtWShJ9DUdkSxlUAlczyuv%2bg8iioaXHgPWripPH1Knslfr7zd2pkuDmzeKMVwQRVEdecxRFCXYfFRgRBWMEElxGV0MSdAtFU3wdVQRuBBpYQ2dCJXY%3d; __jdv=122270672|kong|t_1001529093_a_25_20|jingfen|4ab2b7d1fccb47f9abf05796a6cd6b65|1562245787968; __jdu=1561051160226658086940; TrackID=11vMJ7ONs0xS5oqXK7Il505he_413Dl8geAQ3OWLbb2gg9zdxRIf6NtNxVd8Jma6l7Fh6NCMmXlgKN46KZpmBYVWnal5fKnGZhE1iw2AAAEY; shshshfp=0f99aa3bd48949c0f3d2e736620919a4; cn=16; __jdc=122270672; __jda=122270672.1561051160226658086940.1561051160.1562256944.1562310002.34'}
-		session = requests.session()
-		session.headers = headers
-		if len(target)>400:
-			return None
-		try:
-			resp = session.get(target,verify=False,timeout=(5,20))
-			encoding = resp.encoding
-			if encoding in [None, 'ISO-8859-1']:
-				encodings = requests.utils.get_encodings_from_content(resp.text)
-				if encodings:
-					encoding = encodings[0]
-				else:
-					encoding = resp.apparent_encoding
-				if not encoding:
-					return None
-			return resp.content.decode(encoding)
-		except Exception as e:
-			print('[-]{} Fail to send_requests：{} {}'.format(time.strftime('%H:%M:%S'),target,e))
-			return None
+def parse_script(script,url_parse):
+	if 'javascript' in script:return
+	script = unescape(script)
+	black_list = ['jpg','png','css','apk','ico','jpeg','exe','gif']
+	for bk in black_list:
+		if (script[-len(bk):] or script.split('?')[0][-len(bk):]) == bk:return
+	if script.startswith(('http://','https://')):return script
+	elif script.startswith('////'):
+		script = url_parse.scheme + ':' + script[2:]
+		return script
+	elif script.startswith('///'):
+		script = url_parse.scheme + ':' + script[1:]
+		return script
+	elif script.startswith('//'):
+		script = url_parse.scheme + ':' + script
+		return script
+	elif script.startswith('/'):
+		script = url_parse.scheme + '://' + url_parse.netloc + script
+		return script
+	else:
+		return url_parse.scheme + '://' + url_parse.netloc + url_parse.path + '/' + script
 
-	def process_target(self,target):
-		if not target.startswith(('http://','https://')):
-			target = 'http://' + target
-		return target
-	def process_link(self,parse_result,link):
-		link = unescape(link).strip()
-		if link:
-			if link.startswith(('http://','https://')):return link
-			if link.split('?')[0][-2:] == 'js' or link.split('?')[0][-3:] == 'css' or link.split('?')[0][-3:] == 'jpg' or link.split('?')[0][-3:] == 'gif' or link.split('?')[0][-3:] == 'png' or link.split('?')[0][-3:] == 'ico' or link.split('?')[0][-3:] == 'apk': return None
-			if link[-2:] == 'js' or link[-3:] == 'css' or link[-3:] == 'jpg' or link[-3:] == 'png' or link[-3:] == 'gif' or link[-3:] == 'ico' or link[-3:] == 'apk': return None
-			if 'javascript' in link: return None
-			if link.startswith('./'):
-				link = parse_result.scheme + '://' + parse_result.netloc + parse_result.path + link[1:]
-				return link
-			elif link.startswith('////'):
-				link = 'http://' + link[4:]
-				return link
-			elif link.startswith('//'):
-				link = 'http:' + link
-				return link
-			elif link.startswith('/'):
-				link = parse_result.scheme + '://' + parse_result.netloc + link
-				return link
-			elif link.startswith('../'):
-				link = parse_result.scheme + '://' + parse_result.netloc + parse_result.path + link
-				return link
-			testing_link = 'http://' + link
-			if not (re.findall('[a-zA-Z0-9]',testing_link[7:8])):
-				return None
 
-	def process_js_link(self,parse_result,link):
-		link = unescape(link).strip()
-		if link:
-			try:
-				if link[-1:] == '\\':link = link[:-1]
-				if  link.split('?')[0][-3:] == 'css' or link.split('?')[0][-3:] == 'jpg' or link.split('?')[0][-3:] == 'gif' or link.split('?')[0][-3:] == 'png' or link.split('?')[0][-3:] == 'ico' or link.split('?')[0][-3:] == 'apk': return None
-				if  link[-3:] == 'css' or link[-3:] == 'jpg' or link[-3:] == 'png' or link[-3:] == 'gif' or link[-3:] == 'ico' or link[-3:] == 'apk': return None
-				if 'javascript' in link: return None
-				if link.startswith(('http://','https://')):return link
-				if link.startswith('./'):
-					link = parse_result.scheme + '://' + parse_result.netloc + parse_result.path + link[1:]
-					return link
-				elif link.startswith('////'):
-					link = 'http://' + link[4:]
-					return link
-				elif link.startswith('//'):
-					link = 'http:' + link
-					return link
-				elif link.startswith('/'):
-					link = parse_result.scheme + '://' + parse_result.netloc + link
-					return link
-				elif link.startswith('../'):
-					link = parse_result.scheme + '://' + parse_result.netloc + parse_result.path + link
-					return link
-				testing_link = 'http://' + link
-				if not (re.findall('[a-zA-Z0-9]',testing_link[7:8])):
-					return None
-			except:
-				return None
+def find_href(url):
+	href_pattern = re.compile('href=["|\'](.*?)["|\']',re.S)
+	resp = send_request(url)
+	if resp:
+		url_parse = urlparse(url)
+		href_result = re.findall(href_pattern,resp)
+		for _ in href_result:
+			href = parse_href(_,url_parse)
+			if href:
+				href_parse = urlparse(href)
+				href_domain = href_parse.netloc
+				if lock.acquire():
+					if href_domain not in domains:
+						for keyword in keywords:
+							if keyword in href_domain:
+								#print(href_domain)
+								domains.append(href_domain)
+								print('[{}]{}'.format(len(domains),href_domain))
+								wait_verify_domains.append(href_domain)
+								break
+					lock.release()
+		find_js(url,resp)
 
-	def find_js_raw(self,parse_result,netloc):
-		js_link_pattern = re.compile('src=["|\'](.*?)["|\']',re.S) # /xx.js
-		js_raw_pattern = re.compile('<script.*?>(.*?)</script>',re.S) #<script>javascript_codes</script>
-		#print('http://' + netloc)
-		text = self.send_requests('http://' + netloc)
-		if text:
-			result_link = re.findall(js_link_pattern,text)
-			result_raw = re.findall(js_raw_pattern,text)
-			#print(result_raw)
-			if result_raw:
-				self.extract_URL(parse_result,result_raw)
-			if result_link:
-				for js_link in result_link:
-					js_link = self.process_js_link(parse_result,js_link)
-					if js_link:
-						js_text = self.send_requests(js_link)
-					else:
-						continue
-					if js_text:
-						self.extract_URL(parse_result,js_text)
+def find_js(url,resp):
+	#queue_script = Queue()
+	script_dict = {}
+	url_parse = urlparse(url)
+	script_pattern = re.compile('src=["|\'](.*?)["|\']',re.S)
+	script_text_pattern = re.compile('<script>(.*?)</script>',re.S)
+	script_result = re.findall(script_pattern,resp)
+	if script_result:
+		for _ in script_result:
+			_ = parse_script(_,url_parse)
+			if _:
+				if lock.acquire():
+					if _ not in js_list:
+						#	print(_)
+							script_parse = urlparse(_)
+							script_root_domain = script_parse.netloc
+							if script_root_domain not in domains:
+							#	print(script_root_domain)
+								for keyword in keywords:
+									if keyword in script_root_domain:
+										domains.append(script_root_domain)
+										print('[{}]{}'.format(len(domains),script_root_domain))
+										wait_verify_domains.append(script_root_domain)
+										break
+							js_list.append(_)
+							resp = send_request(_)
+							if resp:
+								script_dict[script_parse] = resp
+					lock.release()
 
-	def extract_URL(self,parse_result,js_text):
-		pattern_raw = r"""
+	script_text_result = re.findall(script_text_pattern,resp)
+	if script_text_result:
+		for _ in script_text_result:
+			script_dict[url_parse] = script_text_result
+	#print(script_dict)
+	if script_dict:
+		find_api(script_dict)
+
+def find_api(script_dict):
+	pattern_raw = r"""
 		(?:"|')                               # Start newline delimiter
 		(
 			((?:[a-zA-Z]{1,10}://|//)           # Match a scheme [a-Z]*1-10 or //
@@ -242,83 +179,133 @@ class JSINFO():
 		)
 		(?:"|')                               # End newline delimiter
 		"""
-		func_list = list()
-		func_js_list = list()
-		pattern = re.compile(pattern_raw, re.VERBOSE)
-		result = re.finditer(pattern, str(js_text))
+	pattern = re.compile(pattern_raw, re.VERBOSE)
+	for script_parse,script_text in script_dict.items():
+		print('[Working]Logging in scrapy {} api.'.format(script_parse.netloc))
+		result = re.finditer(pattern, str(script_text))
 		if result == None:
-			return None
+			continue
 		for match in result:
 			match = match.group().strip('"').strip("'")
-			match = self.process_link(parse_result,match)
+			match = parse_href(match,script_parse)
 			if match:
-				match = self.process_js_link(parse_result,match)
-				if match:
-					if match.split('?')[0][-2:] == 'js' or match[-2:] == 'js':
-						if match not in self.finded_js:
-							self.finded_js.append(match)
-							func_js_list.append(match)
-							continue
-				if match not in self.apis:
-					if match:
-						for keyword in self.keywords:
+				if lock.acquire():
+					if match not in api_list:
+						for keyword in keywords:
 							if keyword in match:
-								with open(self.output_apis,'a+',encoding='utf-8') as f:
-									f.write(match + '\n')
-								print('[+]{} new api find in js_file {}：{}'.format(time.strftime('%H:%M:%S'),parse_result.netloc,match))
-								self.apis.append(match)
-							try:
-								if urlparse(match).netloc not in self.domains:
-									for keyword in self.keywords:
-										if keyword in urlparse(match).netloc:
-											self.domains.append(urlparse(match).netloc)
-											func_list.append(urlparse(match).netloc)
-											if self.output_domains:
-												with open(output_domains,'a+',encoding='utf-8') as f:
-													f.write(urlparse(match).netloc+'\n')
-											print('[+]{} net netloc find in js_file {}：{}'.format(time.strftime('%H:%M:%S'),parse_result.netloc,urlparse(match).netloc))
-							except:
-								continue
-		if func_js_list:
-			for _ in func_js_list:
-				text_js = self.send_requests(_)
-				if text_js:
-					self.extract_URL(parse_result,text_js)
-	def result(self):
-		print('[+]{} find {} netloc'.format(time.strftime('%H:%M:%S'),len(self.domains)))
-		print('[+]{} find {} api'.format(time.strftime('%H:%M:%S'),len(self.apis)))
-		print('[+]{} find {} link'.format(time.strftime('%H:%M:%S'),len(self.urls)))
+								api_list.append(match.strip())
+								if api_file:
+									with open(api_file,'a+',encoding='utf-8') as f:
+										f.write(match.strip() + '\n')
+								else:
+									print('[Find]{}'.format(match.strip()))
+								break
+						api_netloc = urlparse(match).netloc.strip()
+						if api_netloc not in domains:
+							for keyword in keywords:
+								if keyword in api_netloc:
+									if api_netloc.endswith('\\'):
+										api_netloc = api_netloc[:-1]
+									domains.append(api_netloc)
+									print('[{}]{}'.format(len(domains),api_netloc))
+									wait_verify_domains.append(api_netloc)
+									break
+					lock.release()
 
+def main(domain):
+#	global keywords
+	find_href(domain)
+	queue = Queue()
+	lock = Lock()
+	num = 0
+	while len(wait_verify_domains)>0:
+		num = num+1
+		print('------------------------------------------------------第{}次轮询开始'.format(num))
+	#	domain = wait_verify_domains.pop()
+	#	if not domain.startswith(('http://','https://')):
+	#		domain = 'http://' + domain
+		#print(domain)
+		for domain in wait_verify_domains:
+			wait_verify_domains.remove(domain)
+			if not domain.startswith(('http://','https://')):
+				domain = 'http://' + domain
+			queue.put(domain)
+		while queue.qsize()>0:
+			if activeCount()<=20:
+				href_thread = Thread(target=find_href,args=(queue.get(),))
+				href_thread.start()
+				href_thread.join()
+	print('Working done！All find {} api and {} domain'.format(len(api_list),len(domains)))
+	with open(save_domainfile,'a+',encoding='utf-8') as f:
+		for _ in domains:
+			f.write(_.strip()+'\n')
+
+	#	find_href(domain)
 
 if __name__ == '__main__':
 	args = parse_args()
 	domain = args.domain
 	domain_file = args.file
-	keywords = args.keyword
-	output = args.output
-	max_scrapt = args.max
-	url_file = args.url
 	api_file = args.save
-	if domain and domain_file:
-		print('Usage：python3 {} -d baidu.com --keyword baidu'.format(sys.argv[0]))
-		os._exit(0)
+	save_domainfile = args.savedomain
 	if domain:
+	#domain_netloc = urlparse(domain).netloc
 		if not domain.startswith(('http://','https://')):
 			domain = 'http://' + domain
-		jsinfo = JSINFO([urlparse(domain).netloc],keywords,api_file,url_file,output,max_scrapt)
-		jsinfo.scrapy_links([domain])
-		jsinfo.result()
-	if domain_file:
-		domain_list = list()
-		netloc_list = list()
+		try:
+			domain_netloc = urlparse(domain).netloc
+			domains.append(domain_netloc)
+		except:
+			print('[Error!]Can\'t access to domain：{}'.format(domain))
+		if args.keyword:
+			keywords = args.keyword.split(',')
+		else:
+			keywords = None
+		if keywords is None:
+			if len(domain_netloc.split('.'))>=3:
+				keywords = domain_netloc.split('.')[1:2]
+				#print(domain_netloc.split('.'))
+			elif len(domain_netloc.split('.'))<3:
+				keywords = domain_netloc.split('.')[0:1]
+			keyword_check = input('由于未指定关键字，程序选取关键字为{}，若不正确，请输入你的关键字：'.format(keywords))
+			if  keyword_check :
+				keywords = keyword_check.split(',')
+		#	print(keyword_check)
+		#print(keywords)
+		#return
+		domains.append(domain_netloc)
+		main(domain)
+	elif domain_file:
+		queue_file = Queue()
 		with open(domain_file,'r+') as f:
 			for _ in f:
+				domains.append(_)
 				if not _.startswith(('http://','https://')):
-					domain = 'http://' + _
-				if domain not in domain_list:
+					_ = 'http://' + _
+				queue_file.put(_.strip())
+		while queue_file.qsize()>0:
+			if activeCount()<=10:
+				domain = queue_file.get()
+				try:
 					domain_netloc = urlparse(domain).netloc
-					netloc_list.append(domain_netloc)
-					domain_list.append(domain)
-			jsinfo = JSINFO(netloc_list,keywords,api_file,url_file,output,max_scrapt)
-			jsinfo.scrapy_links(domain_list)
-			jsinfo.result
+				except:
+					print('[Error!]Can\'t access to domain：{}'.format(domain))
+				if args.keyword:
+					keywords = args.keyword.split(',')
+				else:
+					keywords = None
+				if keywords is None:
+					if len(domain_netloc.split('.'))>=3:
+						keywords = domain_netloc.split('.')[1:2]
+						#print(domain_netloc.split('.'))
+					elif len(domain_netloc.split('.'))<3:
+						keywords = domain_netloc.split('.')[0:1]
+					if not args.batch:
+						keyword_check = input('由于未指定关键字，程序选取关键字为{}，若不正确，请输入你的关键字：'.format(keywords))
+					if keyword_check:
+						keywords = keyword_check.split(',')
+				#print(keywords)
+				domain_thread = Thread(target=main,args=(domain,))
+				domain_thread.start()
+				domain_thread.join()
+
