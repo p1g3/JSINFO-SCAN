@@ -30,7 +30,7 @@
 ### Usage
 
 ```
-python3 jsinfo.py -d jd.com --keyword jd,joybuy,360 -o jd_domains.txt --save jd_apis.txt
+python3 jsinfo.py -d jd.com --keyword jd --save jd.api.txt --savedomain jd.domain.txt
 ```
 
 - -d/-f
@@ -41,7 +41,7 @@ python3 jsinfo.py -d jd.com --keyword jd,joybuy,360 -o jd_domains.txt --save jd_
 
 设置爬取关键字，会使用该关键字对域名进行匹配，必选项。
 
-- -o
+- --savedomain
 
 设置爬取出来的域名保存路径
 
