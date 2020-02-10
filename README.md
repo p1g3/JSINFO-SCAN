@@ -67,7 +67,9 @@ python3 jsinfo.py -d jd.com --keyword jd --save jd.api.txt --savedomain jd.domai
 
 2020-2-10：重构代码，整体使用了协程，使用队列的方式作为递归标准，默认递归深度为8，可根据自身需要进行修改。
 
+经过测试，速度是v1版本的十倍不止，并且获取到的域名也是v1版本的两倍，但是这一版取消了获取api。
+
 效果：
 
-![](https://s2.ax1x.com/2020/02/10/1ImiUe.md.jpg)
+![](https://s2.ax1x.com/2020/02/10/1ImiUe.jpg)
 
