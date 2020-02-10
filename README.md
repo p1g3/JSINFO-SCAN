@@ -65,4 +65,9 @@ python3 jsinfo.py -d jd.com --keyword jd --save jd.api.txt --savedomain jd.domai
 
 2019-7-5：重构代码，加入了爬行深度的设定，深度为1~2，默认为1，2即为深度爬取，同时增加了url的存储，即深度爬取爬取到的链接。
 
+2020-2-10：重构代码，整体使用了协程，使用队列的方式作为递归标准，默认递归深度为8，可根据自身需要进行修改。
+
+效果：
+
+![](https://s2.ax1x.com/2020/02/10/1ImiUe.md.jpg)
 
