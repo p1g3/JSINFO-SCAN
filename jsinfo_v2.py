@@ -24,7 +24,7 @@ class JSINFO():
 
     def __init__(self,domain,keyword,domain_output,depth):
         if not domain.startswith(('http://','https://')):
-            self.domain = 'http://www.'+domain
+            self.domain = 'http://'+domain
         else:
             self.domain = domain
         self.keywords = keyword
