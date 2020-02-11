@@ -275,6 +275,6 @@ if __name__ == "__main__":
         JSINFO(domain,keywords,output,depth).run()
     
     if output:
-            with open(domain_output,'a+') as f:
+            with open(output,'a+') as f:
                 for domain in sub_domains:
                     f.write(domain+'\n')
