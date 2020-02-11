@@ -12,6 +12,8 @@ from aiohttp import TCPConnector
 import argparse
 import sys
 
+sub_domains = []
+
 def parse_args():
     parser = argparse.ArgumentParser(epilog='\tUsage:\npython ' + sys.argv[0] + " -d www.baidu.com --keyword baidu")
     parser.add_argument("--depth", help="Scrapy depth.")
@@ -39,7 +41,7 @@ class JSINFO():
         self.jslinks = []
         self.apis = []
         if depth:
-            self.maxcount = depth
+            self.maxcount = int(depth)
         else:
             self.maxcount = 8
         self.rootdomains = []
@@ -49,6 +51,7 @@ class JSINFO():
         self.js_pattern = re.compile('<script.*?src="(.*?)"',re.S)
         self.js_text_pattern = re.compile('<script.*?>(.*?)</script>',re.S)
         self.js_ip_pattern = re.compile('([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})',re.S)
+        logger.info('max deepth is ：{}'.format(self.maxcount))
         # start the work
     
     def run(self):
@@ -59,7 +62,7 @@ class JSINFO():
                 logger.info('-----------------------------------------------------------------------------------')
                 logger.info('|正在进行第{}次迭代'.format(n))
                 logger.info('|当前url列表数量：{}'.format(len(list(self.links_new.keys()))))
-                logger.info('|当前域名数量：{}'.format(len(self.domains)))
+                logger.info('|当前域名数量：{}'.format(len(sub_domains)))
                 logger.info('|当前根域名数量：{}'.format(len(self.rootdomains)))
                 logger.info('|已解析链接数量：{}'.format(len(self.extract_links)-len(list(self.links_new.keys()))))
                 logger.info('-----------------------------------------------------------------------------------')
@@ -89,7 +92,7 @@ class JSINFO():
                 logger.info('-----------------------------------------------------------')
                 logger.info('|正在进行第{}次迭代'.format(n))
                 logger.info('|当前url列表数量：{}'.format(len(list(self.links_new.keys()))))
-                logger.info('|当前域名数量：{}'.format(len(self.domains)))
+                logger.info('|当前域名数量：{}'.format(len(sub_domains)))
                 logger.info('|当前根域名数量：{}'.format(len(self.rootdomains)))
                 logger.info('|已解析链接数量：{}'.format(len(self.extract_links)-len(list(self.links_new.keys()))))
                 logger.info('-----------------------------------------------------------')
@@ -121,11 +124,7 @@ class JSINFO():
                 else:
                     break
             
-        logger.info('all subdomain\'s count：{}'.format(len(self.domains)))
-        if self.domain_output:
-            with open(self.domain_output,'a+') as f:
-                for domain in self.domains:
-                    f.write(domain+'\n')
+        logger.info('all subdomain\'s count：{}'.format(len(sub_domains)))
 
 
 
@@ -244,9 +243,9 @@ class JSINFO():
                 for keyword in self.keywords:
                     if keyword in parse_netloc:
                         if keyword in root_domain:
-                            if parse_netloc not in self.domains:
+                            if parse_netloc not in sub_domains:
                                 if 'en.alibaba.com' not in parse_netloc:
-                                    self.domains.append(parse_netloc)
+                                    sub_domains.append(parse_netloc)
                                     logger.info('Collect a new domain：{}',parse_netloc)
                             if 'http://' + parse_netloc + '/' not in self.extract_links and 'http://' + parse_netloc not in self.extract_links and 'https://' + parse_netloc not in self.extract_links and 'https://' + parse_netloc +'/' not in self.extract_links:
                                 #self.links.append('http://' + parse_netloc + '/')
@@ -274,3 +273,8 @@ if __name__ == "__main__":
             domains.append(domain.strip())
     for domain in domains:
         JSINFO(domain,keywords,output,depth).run()
+    
+    if output:
+            with open(domain_output,'a+') as f:
+                for domain in sub_domains:
+                    f.write(domain+'\n')
