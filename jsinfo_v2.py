@@ -20,11 +20,12 @@ def parse_args():
     parser.add_argument("-f", "--file", help="File of domain or target you want to scrapy",required=True)
     parser.add_argument("--keyword", help="Keywords of domain regexp",required=True)
     parser.add_argument("-o","--output", help="Saving domains file.")
+    parser.add_argument("-io","--info_output", help="Saving info file.")
     return parser.parse_args()
 
 class JSINFO():
 
-    def __init__(self,domain,keyword,domain_output,depth):
+    def __init__(self,domain,keyword,domain_output,depth,info_output):
         if not domain.startswith(('http://','https://')):
             self.domain = 'http://'+domain
         else:
@@ -40,6 +41,10 @@ class JSINFO():
         self.domains = []
         self.jslinks = []
         self.apis = []
+        self.mails = []
+        self.iplist = []
+        self.authors = []
+        self.info_output = info_output
         if depth:
             self.maxcount = int(depth)
         else:
@@ -125,7 +130,16 @@ class JSINFO():
                     break
             
         logger.info('all subdomain\'s count：{}'.format(len(sub_domains)))
-
+        if self.info_output:
+            for mail in self.mails:
+                with open(self.info_output,'a+') as f:
+                    f.write(mail+'\n')
+            for ip in self.iplist:
+                with open(self.info_output,'a+') as f:
+                    f.write(ip+'\n')
+            for author in self.authors:
+                with open(self.info_output,'a+') as f:
+                    f.write(str(author)+'\n')
 
 
     async def find_link(self,link):
@@ -139,6 +153,7 @@ class JSINFO():
             logger.warning('resolve {} fail，exception：{}',link,e)
             return
         links = re.findall(self.link_pattern,resp)
+        self.other_info(resp)
         try:
             parse_url = urlparse(link)
         except:
@@ -189,6 +204,7 @@ class JSINFO():
         pattern = re.compile(pattern, re.VERBOSE)
         for text in script_text:
             results = re.finditer(pattern, str(text))
+            self.other_info(str(text))
             if results:
                 for match in results:
                     match = match.group().strip('"').strip("'")
@@ -259,7 +275,32 @@ class JSINFO():
                     func_js.append(url)
         return func_js
             
-                        
+    def other_info(self,text):
+        mail_pattern = re.compile('([\w-]+@[\w-]+[\.\w-]+)',re.S)
+        ip_pattern = re.compile('[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}',re.S)
+        author_pattern = re.compile('@author[: ]+(.*?) ',re.S)
+        mails_result = re.findall(mail_pattern,text)
+        #print(text)
+        if mails_result != []:
+            for mail in mails_result:
+                mail = mail.strip()
+                if mail not in self.mails:
+                    self.mails.append(mail)
+                    logger.info('Find a mail：{}'.format(mail))
+        ip_result = re.findall(ip_pattern,text)
+        if ip_result != []:
+            for ip in ip_result:
+                ip = ip.strip()
+                if ip not in self.iplist:
+                    self.iplist.append(ip.strip())
+                    logger.info('Find a ip：{}'.format(ip))
+        author_result = re.findall(author_pattern,text)
+        if author_result != []:
+            for author in author_result:
+                author = author.strip()
+                if author not in self.authors:
+                    self.authors.append(author)
+                    logger.info('Find a author：{}'.format(author))
 
 if __name__ == "__main__":
     args = parse_args()
@@ -268,11 +309,12 @@ if __name__ == "__main__":
     keywords = args.keyword.split(',')
     depth = args.depth
     domains = []
+    info_output = args.info_output
     with open(domain_file,'r+') as f1:
         for domain in f1:
             domains.append(domain.strip())
     for domain in domains:
-        JSINFO(domain,keywords,output,depth).run()
+        JSINFO(domain,keywords,output,depth,info_output).run()
     
     if output:
             with open(output,'a+') as f:
