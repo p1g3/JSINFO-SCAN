@@ -276,7 +276,7 @@ class JSINFO():
         return func_js
             
     def other_info(self,text):
-        mail_pattern = re.compile('([\w-]+@[\w-]+[\.\w-]+)',re.S)
+        mail_pattern = re.compile('([-_\w\.]{0,64}@[-\w]{1,63}\.*[-\w]{1,63})',re.S)
         ip_pattern = re.compile('[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}',re.S)
         author_pattern = re.compile('@author[: ]+(.*?) ',re.S)
         mails_result = re.findall(mail_pattern,text)
@@ -284,6 +284,8 @@ class JSINFO():
         if mails_result != []:
             for mail in mails_result:
                 mail = mail.strip()
+                if '.' not in mail:
+                    continue
                 if mail not in self.mails:
                     self.mails.append(mail)
                     logger.info('Find a mail：{}'.format(mail))
