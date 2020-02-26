@@ -73,3 +73,10 @@ python3 jsinfo.py -d jd.com --keyword jd --save jd.api.txt --savedomain jd.domai
 
 ![](https://s2.ax1x.com/2020/02/10/1ImiUe.jpg)
 
+
+2020-2-16：增加搜集其他信息的功能，比如邮箱，代码作者，ip等。
+
+效果：
+
+![3Ufg5n.png](https://s2.ax1x.com/2020/02/26/3Ufg5n.png)
+
