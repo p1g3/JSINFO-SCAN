@@ -55,7 +55,7 @@ class JSINFO():
         self.link_pattern = re.compile('href="(.*?)"',re.S)
         self.js_pattern = re.compile('<script.*?src="(.*?)"',re.S)
         self.js_text_pattern = re.compile('<script.*?>(.*?)</script>',re.S)
-        self.js_ip_pattern = re.compile('([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})',re.S)
+        self.js_ip_pattern = re.compile('((2(5[0-5]|[0-4]\d))|[0-1]?\d{1,2})(.((2(5[0-5]|[0-4]\d))|[0-1]?\d{1,2})){3}',re.S)
         logger.info('max deepth is ：{}'.format(self.maxcount))
         # start the work
     
