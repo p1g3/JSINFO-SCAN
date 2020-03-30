@@ -70,6 +70,9 @@ class JSINFO():
                 logger.info('|当前域名数量：{}'.format(len(sub_domains)))
                 logger.info('|当前根域名数量：{}'.format(len(self.rootdomains)))
                 logger.info('|已解析链接数量：{}'.format(len(self.extract_links)-len(list(self.links_new.keys()))))
+                logger.info('|当前根域名列表如下：')
+                for rootdomain in self.rootdomains:
+                	logger.info('|{}'.format(rootdomain))
                 logger.info('-----------------------------------------------------------------------------------')
                 n+=1
                 i = 0
@@ -99,6 +102,9 @@ class JSINFO():
                 logger.info('|当前url列表数量：{}'.format(len(list(self.links_new.keys()))))
                 logger.info('|当前域名数量：{}'.format(len(sub_domains)))
                 logger.info('|当前根域名数量：{}'.format(len(self.rootdomains)))
+                logger.info('|当前根域名列表如下：')
+                for rootdomain in self.rootdomains:
+                	logger.info('|{}'.format(rootdomain))
                 logger.info('|已解析链接数量：{}'.format(len(self.extract_links)-len(list(self.links_new.keys()))))
                 logger.info('-----------------------------------------------------------')
                 n+=1
@@ -277,7 +283,7 @@ class JSINFO():
             
     def other_info(self,text):
         mail_pattern = re.compile('([-_\w\.]{0,64}@[-\w]{1,63}\.*[-\w]{1,63})',re.S)
-        ip_pattern = re.compile('[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}',re.S)
+        ip_pattern = re.compile('(25[0-5]|2[0-4]\d|[0-1]\d{2}|[1-9]?\d).(25[0-5]|2[0-4]\d|[0-1]\d{2}|[1-9]?\d).(25[0-5]|2[0-4]\d|[0-1]\d{2}|[1-9]?\d).(25[0-5]|2[0-4]\d|[0-1]\d{2}|[1-9]?\d)',re.S)
         author_pattern = re.compile('@author[: ]+(.*?) ',re.S)
         mails_result = re.findall(mail_pattern,text)
         #print(text)
@@ -292,9 +298,9 @@ class JSINFO():
         ip_result = re.findall(ip_pattern,text)
         if ip_result != []:
             for ip in ip_result:
-                ip = ip.strip()
+                ip = '.'.join(ip).strip()
                 if ip not in self.iplist:
-                    self.iplist.append(ip.strip())
+                    self.iplist.append(ip)
                     logger.info('Find a ip：{}'.format(ip))
         author_result = re.findall(author_pattern,text)
         if author_result != []:
