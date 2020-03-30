@@ -301,7 +301,7 @@ class JSINFO():
                 ip = '.'.join(ip).strip()
                 if ip not in self.iplist:
                     self.iplist.append(ip)
-                    logger.info('Find a ip：{}'.format(ip))
+                    # logger.info('Find a ip：{}'.format(ip))
         author_result = re.findall(author_pattern,text)
         if author_result != []:
             for author in author_result:
