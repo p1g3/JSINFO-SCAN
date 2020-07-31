@@ -223,6 +223,11 @@ class JSINFO:
                 i = str(i)
                 f.write(i.strip() + '\n')
 
+        logger.info('[+]Root domains ==> {}'.format(now_time + '_rootdomain'))
+        logger.info('[+]Sub domains ==> {}'.format(now_time + '_subdomain'))
+        logger.info('[+]Apis ==> {}'.format(now_time + '_apis'))
+        logger.info('[+]LeakInfos ==> {}'.format(now_time + '_leakinfos'))
+
     async def FindLinkInPage(self, url):
         """发起请求"""
         try:
