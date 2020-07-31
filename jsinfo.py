@@ -1,311 +1,445 @@
-import requests,re
-from threading import Thread,activeCount,Lock
-from html import unescape
+import argparse
+import asyncio
+import os
+import re
+import sys
+import threading
+from asyncio import CancelledError
 from queue import Queue
 from urllib.parse import urlparse
+import json
+import aiohttp
+from loguru import logger
+from tldextract import extract
+import socket
 from html import unescape
-import sys,os,chardet
-import argparse
+import time
 
-domains = list()
-wait_verify_domains = list()
-js_list = list()
-api_list = list()
-lock = Lock()
+"""
+3.增加从JS中提取敏感信息的功能
+"""
 
-requests.packages.urllib3.disable_warnings()
-def parse_args():
-	parser = argparse.ArgumentParser(epilog='\tUsage:\npython ' + sys.argv[0] + " -d www.baidu.com --keyword baidu")
-	parser.add_argument("-d", "--domain", help="Site you want to scrapy")
-	parser.add_argument("-f", "--file", help="File of domain or target you want to scrapy")
-	parser.add_argument("--keyword", help="Keywords of domain regexp")
-	parser.add_argument("--save", help="Saving apis file.")
-	parser.add_argument("--savedomain", help="Saving domains file.")
-	parser.add_argument("--batch", help="Don\'t need to enter the keywords")
-	return parser.parse_args()
+"""解决发起请求时的错误"""
 
-def send_request(url):
-#	if not url.startswith(('http://','https://')):
-	#	url = 'http://' + url
-	headers = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.142 Safari/537.36'}
-	session =  requests.session()
-	session.headers = headers
-	try:
-		resp = session.get(url,timeout=(5,20),verify=False)
-	except Exception as e:
-		print('[Error]Can\'t access to {}'.format(url.strip()))
-		return
-	try:
-		encoding = resp.encoding
-		if encoding in [None,'ISO-8859-1']:
-			encodings = requests.utils.get_encodings_from_content(resp.text)
-			if encodings:
-				encoding = encodings[0]
-			else:
-				encoding = resp.apparent_encoding
-		return resp.content.decode(encoding)
-	except:
-		if 'charset' not in resp.headers.get('Content-Type', " "):
-			resp.encoding = chardet.detect(resp.content).get('encoding')  # 解决网页编码问题
-		return resp.text
-
-def parse_href(href,url_parse):
-	if 'javascript' in href:return
-	href = unescape(href)
-	black_list = ['jpg','png','css','apk','ico','js','jpeg','exe','gif']
-	for bk in black_list:
-		if (href[-len(bk):] or href.split('?')[0][-len(bk):]) == bk:return
-	if href.startswith(('http://','https://')):return href
-	elif href.startswith('////'):
-		href = url_parse.scheme + ':' + href[2:]
-		return href
-	elif href.startswith('///'):
-		href = url_parse.scheme + ':' + href[1:]
-		return href
-	elif href.startswith('//'):
-		href = url_parse.scheme  + ':' +  href
-		return href
-	elif href.startswith('/'):
-		href = url_parse.scheme + '://' + url_parse.netloc + href
-		return href
-	else:
-		return url_parse.scheme + '://' + url_parse.netloc + url_parse.path + '/' + href
-
-def parse_script(script,url_parse):
-	if 'javascript' in script:return
-	script = unescape(script)
-	black_list = ['jpg','png','css','apk','ico','jpeg','exe','gif']
-	for bk in black_list:
-		if (script[-len(bk):] or script.split('?')[0][-len(bk):]) == bk:return
-	if script.startswith(('http://','https://')):return script
-	elif script.startswith('////'):
-		script = url_parse.scheme + ':' + script[2:]
-		return script
-	elif script.startswith('///'):
-		script = url_parse.scheme + ':' + script[1:]
-		return script
-	elif script.startswith('//'):
-		script = url_parse.scheme + ':' + script
-		return script
-	elif script.startswith('/'):
-		script = url_parse.scheme + '://' + url_parse.netloc + script
-		return script
-	else:
-		return url_parse.scheme + '://' + url_parse.netloc + url_parse.path + '/' + script
+socket.setdefaulttimeout(20)
 
 
-def find_href(url):
-	href_pattern = re.compile('href=["|\'](.*?)["|\']',re.S)
-	resp = send_request(url)
-	if resp:
-		url_parse = urlparse(url)
-		href_result = re.findall(href_pattern,resp)
-		for _ in href_result:
-			href = parse_href(_,url_parse)
-			if href:
-				href_parse = urlparse(href)
-				href_domain = href_parse.netloc
-				if lock.acquire():
-					if href_domain not in domains:
-						for keyword in keywords:
-							if keyword in href_domain:
-								#print(href_domain)
-								domains.append(href_domain)
-								print('[{}]{}'.format(len(domains),href_domain))
-								wait_verify_domains.append(href_domain)
-								break
-					lock.release()
-		find_js(url,resp)
+class JSINFO:
+    def argparser(self):
+        """解析参数"""
+        parser = argparse.ArgumentParser(description='JSINFO can help you find the information hidden in JS and '
+                                                     'expand the scope of your assets.',
+                                         epilog='\tUsage:\npython ' + sys.argv[
+                                             0] + " --target www.baidu.com --keywords baidu")
+        parser.add_argument('--target', help='A target like www.example.com or subdomains.txt', required=True)
+        parser.add_argument('--keywords', help='Keyword will be split in "," to extract subdomain')
+        parser.add_argument('--black_keywords', help='Black keywords in html source')
+        args = parser.parse_args()
+        return args
 
-def find_js(url,resp):
-	#queue_script = Queue()
-	script_dict = {}
-	url_parse = urlparse(url)
-	script_pattern = re.compile('src=["|\'](.*?)["|\']',re.S)
-	script_text_pattern = re.compile('<script>(.*?)</script>',re.S)
-	script_result = re.findall(script_pattern,resp)
-	if script_result:
-		for _ in script_result:
-			_ = parse_script(_,url_parse)
-			if _:
-				if lock.acquire():
-					if _ not in js_list:
-						#	print(_)
-							script_parse = urlparse(_)
-							script_root_domain = script_parse.netloc
-							if script_root_domain not in domains:
-							#	print(script_root_domain)
-								for keyword in keywords:
-									if keyword in script_root_domain:
-										domains.append(script_root_domain)
-										print('[{}]{}'.format(len(domains),script_root_domain))
-										wait_verify_domains.append(script_root_domain)
-										break
-							js_list.append(_)
-							resp = send_request(_)
-							if resp:
-								script_dict[script_parse] = resp
-					lock.release()
+    def __init__(self):
 
-	script_text_result = re.findall(script_text_pattern,resp)
-	if script_text_result:
-		for _ in script_text_result:
-			script_dict[url_parse] = script_text_result
-	#print(script_dict)
-	if script_dict:
-		find_api(script_dict)
+        self.banner()
+        args = self.argparser()
 
-def find_api(script_dict):
-	pattern_raw = r"""
-		(?:"|')                               # Start newline delimiter
-		(
-			((?:[a-zA-Z]{1,10}://|//)           # Match a scheme [a-Z]*1-10 or //
-			[^"'/]{1,}\.                        # Match a domainname (any character + dot)
-			[a-zA-Z]{2,}[^"']{0,})              # The domainextension and/or path
-			|
-			((?:/|\.\./|\./)                    # Start with /,../,./
-			[^"'><,;| *()(%%$^/\\\[\]]          # Next character can't be...
-			[^"'><,;|()]{1,})                   # Rest of the characters can't be
-			|
-			([a-zA-Z0-9_\-/]{1,}/               # Relative endpoint with /
-			[a-zA-Z0-9_\-/]{1,}                 # Resource name
-			\.(?:[a-zA-Z]{1,4}|action)          # Rest + extension (length 1-4 or action)
-			(?:[\?|/][^"|']{0,}|))              # ? mark with parameters
-			|
-			([a-zA-Z0-9_\-]{1,}                 # filename
-			\.(?:php|asp|aspx|jsp|json|
-				action|html|js|txt|xml)             # . + extension
-			(?:\?[^"|']{0,}|))                  # ? mark with parameters
-		)
-		(?:"|')                               # End newline delimiter
+        """初始化参数"""
+        self.queue = Queue()
+        self.root_domains = []
+        target = args.target
+        if not target.startswith(('http://', 'https://')) and not os.path.isfile(target):
+            target = 'http://' + target
+        elif os.path.isfile(target):
+            with open(target, 'r+', encoding='utf-8') as f:
+                for domain in f:
+                    domain = domain.strip()
+                    if not domain.startswith(('http://', 'https://')):
+                        self.root_domains.append(domain)
+                        domain = 'http://www.' + domain
+                        self.queue.put(domain)
+        if args.keywords is None:
+            keyword = extract(target).domain
+        else:
+            keyword = args.keywords
+        self.keywords = keyword.split(',')
+        if args.black_keywords is not None:
+            self.black_keywords = args.black_keywords.split(',')
+        else:
+            self.black_keywords = []
+
+        self.black_extend_list = ['png', 'jpg', 'gif', 'jpeg', 'ico', 'svg', 'bmp', 'mp3', 'mp4', 'avi', 'mpeg', 'mpg',
+                                  'mov', 'zip', 'rar', 'tar', 'gz', 'mpeg', 'mkv', 'rmvb', 'iso', 'css', 'txt', 'ppt',
+                                  'dmg', 'app', 'exe', 'pem', 'doc', 'docx', 'pkg', 'pdf', 'xml', 'eml''ini', 'so',
+                                  'vbs', 'json', 'webp', 'woff', 'ttf', 'otf', 'log', 'image', 'map', 'woff2', 'mem',
+                                  'wasm', 'pexe', 'nmf']
+        self.black_filename_list = ['jquery', 'bootstrap', 'react', 'vue', 'google-analytics']
+        self.extract_urls = []
+        self._value_lock = threading.Lock()
+        self.leak_infos = []  # 存储元祖，每个元素对应为：敏感信息正则名称、敏感信息值、敏感信息来源页面
+        self.leak_infos_match = []
+        """将用户输入存入队列中"""
+        if not os.path.isfile(target):
+            self.queue.put(target)
+
+        """最终返回的信息列表"""
+        self.apis = []
+        self.sub_domains = []
+
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) '
+                          'Chrome/79.0.3945.130 Safari/537.36'}
+        """正则"""
+        link_pattern = r"""
+            (?:"|')                               # Start newline delimiter
+            (
+                ((?:[a-zA-Z]{1,10}://|//)           # Match a scheme [a-Z]*1-10 or //
+                [^"'/]{1,}\.                        # Match a domainname (any character + dot)
+                [a-zA-Z]{2,}[^"']{0,})              # The domainextension and/or path
+                |
+                ((?:/|\.\./|\./)                    # Start with /,../,./
+                [^"'><,;| *()(%%$^/\\\[\]]          # Next character can't be...
+                [^"'><,;|()]{1,})                   # Rest of the characters can't be
+                |
+                ([a-zA-Z0-9_\-/]{1,}/               # Relative endpoint with /
+                [a-zA-Z0-9_\-/]{1,}                 # Resource name
+                \.(?:[a-zA-Z]{1,4}|action)          # Rest + extension (length 1-4 or action)
+                (?:[\?|/][^"|']{0,}|))              # ? mark with parameters
+                |
+                ([a-zA-Z0-9_\-]{1,}                 # filename
+                \.(?:php|asp|aspx|jsp|json|
+                    action|html|js|txt|xml)             # . + extension
+                (?:\?[^"|']{0,}|))                  # ? mark with parameters
+            )
+            (?:"|')                               # End newline delimiter
 		"""
-	pattern = re.compile(pattern_raw, re.VERBOSE)
-	for script_parse,script_text in script_dict.items():
-		print('[Working]Logging in scrapy {} api.'.format(script_parse.netloc))
-		result = re.finditer(pattern, str(script_text))
-		if result == None:
-			continue
-		for match in result:
-			match = match.group().strip('"').strip("'")
-			match = parse_href(match,script_parse)
-			if match:
-				if lock.acquire():
-					if match not in api_list:
-						for keyword in keywords:
-							if keyword in match:
-								api_list.append(match.strip())
-								if api_file:
-									with open(api_file,'a+',encoding='utf-8') as f:
-										f.write(match.strip() + '\n')
-								else:
-									print('[Find]{}'.format(match.strip()))
-								break
-						api_netloc = urlparse(match).netloc.strip()
-						if api_netloc not in domains:
-							for keyword in keywords:
-								if keyword in api_netloc:
-									if api_netloc.endswith('\\'):
-										api_netloc = api_netloc[:-1]
-									domains.append(api_netloc)
-									print('[{}]{}'.format(len(domains),api_netloc))
-									wait_verify_domains.append(api_netloc)
-									break
-					lock.release()
+        self.link_pattern = re.compile(link_pattern, re.VERBOSE)
+        self.js_pattern = 'src=["\'](.*?)["\']'
+        self.href_pattern = 'href=["\'](.*?)["\']'
+        self.leak_info_patterns = {'mail': r'([-_a-zA-Z0-9\.]{1,64}@%s)', 'author': '@author[: ]+(.*?) ',
+                                   'accesskey_id': 'accesskeyid.*?["\'](.*?)["\']',
+                                   'accesskey_secret': 'accesskeyid.*?["\'](.*?)["\']',
+                                   'access_key': 'access_key.*?["\'](.*?)["\']', 'google_api': r'AIza[0-9A-Za-z-_]{35}',
+                                   'google_captcha': r'6L[0-9A-Za-z-_]{38}|^6[0-9a-zA-Z_-]{39}$',
+                                   'google_oauth': r'ya29\.[0-9A-Za-z\-_]+',
+                                   'amazon_aws_access_key_id': r'AKIA[0-9A-Z]{16}',
+                                   'amazon_mws_auth_toke': r'amzn\\.mws\\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+                                   'amazon_aws_url': r's3\.amazonaws.com[/]+|[a-zA-Z0-9_-]*\.s3\.amazonaws.com',
+                                   'amazon_aws_url2': r"("r"[a-zA-Z0-9-\.\_]+\.s3\.amazonaws\.com"r"|s3://[a-zA-Z0-9-\.\_]+"r"|s3-[a-zA-Z0-9-\.\_\/]+"r"|s3.amazonaws.com/[a-zA-Z0-9-\.\_]+"r"|s3.console.aws.amazon.com/s3/buckets/[a-zA-Z0-9-\.\_]+)",
+                                   'facebook_access_token': r'EAACEdEose0cBA[0-9A-Za-z]+',
+                                   'authorization_basic': r'basic [a-zA-Z0-9=:_\+\/-]{5,100}',
+                                   'authorization_bearer': r'bearer [a-zA-Z0-9_\-\.=:_\+\/]{5,100}',
+                                   'authorization_api': r'api[key|_key|\s+]+[a-zA-Z0-9_\-]{5,100}',
+                                   'mailgun_api_key': r'key-[0-9a-zA-Z]{32}',
+                                   'twilio_api_key': r'SK[0-9a-fA-F]{32}',
+                                   'twilio_account_sid': r'AC[a-zA-Z0-9_\-]{32}',
+                                   'twilio_app_sid': r'AP[a-zA-Z0-9_\-]{32}',
+                                   'paypal_braintree_access_token': r'access_token\$production\$[0-9a-z]{16}\$[0-9a-f]{32}',
+                                   'square_oauth_secret': r'sq0csp-[ 0-9A-Za-z\-_]{43}|sq0[a-z]{3}-[0-9A-Za-z\-_]{22,43}',
+                                   'square_access_token': r'sqOatp-[0-9A-Za-z\-_]{22}|EAAA[a-zA-Z0-9]{60}',
+                                   'stripe_standard_api': r'sk_live_[0-9a-zA-Z]{24}',
+                                   'stripe_restricted_api': r'rk_live_[0-9a-zA-Z]{24}',
+                                   'github_access_token': r'[a-zA-Z0-9_-]*:[a-zA-Z0-9_\-]+@github\.com*',
+                                   'rsa_private_key': r'-----BEGIN RSA PRIVATE KEY-----',
+                                   'ssh_dsa_private_key': r'-----BEGIN DSA PRIVATE KEY-----',
+                                   'ssh_dc_private_key': r'-----BEGIN EC PRIVATE KEY-----',
+                                   'pgp_private_block': r'-----BEGIN PGP PRIVATE KEY BLOCK-----',
+                                   'json_web_token': r'ey[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*$',
+                                   'slack_token': r"\"api_token\":\"(xox[a-zA-Z]-[a-zA-Z0-9-]+)\"",
+                                   'SSH_privKey': r"([-]+BEGIN [^\s]+ PRIVATE KEY[-]+[\s]*[^-]*[-]+END [^\s]+ PRIVATE KEY[-]+)",
+                                   'possible_Creds': r"(?i)("r"password\s*[`=:\"]+\s*[^\s]+|"r"password is\s*[`=:\"]*\s*[^\s]+|"r"pwd\s*[`=:\"]*\s*[^\s]+|"r"passwd\s*[`=:\"]+\s*[^\s]+)", }
 
-def main(domain):
-#	global keywords
-	find_href(domain)
-	queue = Queue()
-	lock = Lock()
-	num = 0
-	while len(wait_verify_domains)>0:
-		num = num+1
-		print('------------------------------------------------------第{}次轮询开始'.format(num))
-	#	domain = wait_verify_domains.pop()
-	#	if not domain.startswith(('http://','https://')):
-	#		domain = 'http://' + domain
-		#print(domain)
-		for domain in wait_verify_domains:
-			wait_verify_domains.remove(domain)
-			if not domain.startswith(('http://','https://')):
-				domain = 'http://' + domain
-			queue.put(domain)
-		while queue.qsize()>0:
-			if activeCount()<=20:
-				href_thread = Thread(target=find_href,args=(queue.get(),))
-				href_thread.start()
-				href_thread.join()
-	print('Working done！All find {} api and {} domain'.format(len(api_list),len(domains)))
-	with open(save_domainfile,'a+',encoding='utf-8') as f:
-		for _ in domains:
-			f.write(_.strip()+'\n')
+        """输出传入的Target以及Keywords"""
+        if not os.path.isfile(target):
+            logger.info('[+]Target ==> {}'.format(target))
+        else:
+            logger.info('[+]Target ==> {}'.format(self.root_domains))
+        logger.info('[+]Keywords ==> {}'.format(self.keywords))
+        logger.info('[+]Black Keywords ==> {}'.format(self.black_keywords))
 
-	#	find_href(domain)
+    def banner(self):
+        """输出banner"""
+        banner = r""" _____  ___    _  _   _  ___    _____ 
+(___  )(  _`\ (_)( ) ( )(  _`\ (  _  )
+    | || (_(_)| || `\| || (_(_)| ( ) |
+ _  | |`\__ \ | || , ` ||  _)  | | | |
+( )_| |( )_) || || |`\ || |    | (_) |
+`\___/'`\____)(_)(_) (_)(_)    (_____)
+        Author：P1g3#p1g3cyx@gmail.com
+            """
+        print(banner)
+
+    def start(self):
+        loop = asyncio.get_event_loop()
+        while self.queue.qsize() > 0:
+            try:
+                while not self.queue.empty():
+                    tasks = []
+                    i = 0
+                    while i < 50 and not self.queue.empty():
+                        """获取基本信息"""
+                        url = self.queue.get()
+                        """根据文件后缀创建异步任务列表"""
+                        filename = os.path.basename(url)
+                        file_extend = self.get_file_extend(filename)
+                        if file_extend == 'js':
+                            tasks.append(asyncio.ensure_future(self.FindLinkInJs(url)))
+                        else:
+                            tasks.append(asyncio.ensure_future(self.FindLinkInPage(url)))
+                        i += 1
+                    """开始跑异步任务"""
+                    if tasks:
+                        loop.run_until_complete(asyncio.wait(tasks))
+                    logger.info('-' * 20)
+                    logger.info('[+]root domain count ==> {}'.format(len(self.root_domains)))
+                    logger.info('[+]sub domain count ==> {}'.format(len(self.sub_domains)))
+                    logger.info('[+]api count ==> {}'.format(len(self.apis)))
+                    logger.info('[+]leakinfos count ==> {}'.format(len(self.leak_infos)))
+                    logger.info('-' * 20)
+            except KeyboardInterrupt:
+                logger.info('[+]Break From Queue.')
+                break
+            except CancelledError:
+                pass
+
+        logger.info('[+]All root domain count ==> {}'.format(len(self.root_domains)))
+        logger.info('[+]All sub domain count ==> {}'.format(len(self.sub_domains)))
+        logger.info('[+]All api count ==> {}'.format(len(self.apis)))
+        logger.info('[+]All leakinfos count ==> {}'.format(len(self.leak_infos)))
+
+        now_time = str(int(time.time()))
+        with open(now_time + '_rootdomain', 'a+', encoding='utf-8') as f:
+            for i in self.root_domains:
+                f.write(i.strip() + '\n')
+
+        with open(now_time + '_subdomain', 'a+', encoding='utf-8') as f:
+            for i in self.sub_domains:
+                f.write(i.strip() + '\n')
+
+        with open(now_time + '_apis', 'a+', encoding='utf-8') as f:
+            for i in self.apis:
+                f.write(i.strip() + '\n')
+
+        with open(now_time + '_leakinfos', 'a+', encoding='utf-8') as f:
+            for i in self.leak_infos:
+                i = str(i)
+                f.write(i.strip() + '\n')
+
+    async def FindLinkInPage(self, url):
+        """发起请求"""
+        try:
+            resp = await self.send_request(url)
+        except ConnectionResetError:
+            return None
+        if not resp:
+            return None
+        if self.black_keywords:
+            for black_keyword in self.black_keywords:
+                if black_keyword in resp:
+                    return False
+        self.find_leak_info(url, resp)  # 探测敏感信息
+        """从页面中获取href以及js_urls"""
+        try:
+            hrefs = re.findall(self.href_pattern, resp)
+        except TypeError:
+            hrefs = []
+        try:
+            js_urls = re.findall(self.js_pattern, resp)
+        except TypeError:
+            js_urls = []
+        try:
+            js_texts = re.findall('<script>(.*?)</script>', resp)
+        except TypeError:
+            js_texts = []
+
+        """获取完整的url"""
+        parse_url = urlparse(url)
+        for href in hrefs:
+            full_href_url = self.extract_link(parse_url, href)
+            if full_href_url is False:
+                continue
+        for js_url in js_urls:
+            full_js_url = self.extract_link(parse_url, js_url)
+            if full_js_url is False:
+                continue
+        for js_text in js_texts:
+            self.FindLinkInJsText(url, js_text)
+
+    async def FindLinkInJs(self, url):
+        resp = await self.send_request(url)
+        if not resp:
+            return False
+        if self.black_keywords:
+            for black_keyword in self.black_keywords:
+                if black_keyword in resp:
+                    return False
+        self.find_leak_info(url, resp)  # 探测敏感信息
+        try:
+            link_finder_matchs = re.finditer(self.link_pattern, str(resp))
+        except:
+            return None
+        for match in link_finder_matchs:
+            match = match.group().strip('"').strip("'")
+            full_api_url = self.extract_link(urlparse(url), match)
+            if full_api_url is False:
+                continue
+
+    def FindLinkInJsText(self, url, text):
+        try:
+            link_finder_matchs = re.finditer(self.link_pattern, str(text))
+        except:
+            return None
+        self.find_leak_info(url, text)  # 探测敏感信息
+        for match in link_finder_matchs:
+            match = match.group().strip('"').strip("'")
+            full_api_url = self.extract_link(urlparse(url), match)
+            if full_api_url is False:
+                continue
+
+    async def send_request(self, url):
+        """解决asyncio的历史遗留BUG"""
+        sem = asyncio.Semaphore(1024)
+        try:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
+                async with sem:
+                    async with session.get(url, timeout=20, headers=self.headers) as req:
+                        await asyncio.sleep(1)
+                        response = await req.text('utf-8', 'ignore')
+                        req.close()
+                        return response
+        except CancelledError:
+            pass
+        except ConnectionResetError:
+            pass
+        except Exception as e:
+            logger.warning('[-]Resolve {} fail'.format(url))
+            return False
+
+    def filter_black_extend(self, file_extend):
+        if file_extend in self.black_extend_list:
+            return True
+
+    def get_file_extend(self, filename):
+        return filename.split('/')[-1].split('?')[0].split('.')[-1].lower()
+
+    def get_format_url(self, parse_link, filename, file_extend):
+        if '-' in filename:
+            split_filename = filename.split('-')
+        elif '_' in filename:
+            split_filename = filename.split('_')
+        else:
+            split_filename = filename.split('-')
+
+        format_filename = ''
+        for split_name in split_filename:
+            try:
+                load_json = json.loads(split_name)
+                if isinstance(load_json, int) or isinstance(load_json, float):
+                    format_filename += '-int'
+            except:
+                format_filename += split_name
+        return parse_link.scheme + '://' + parse_link.netloc + parse_link.path.replace(filename, format_filename)
+
+    def extract_link(self, parse_url, link):
+        """html解码"""
+        link = unescape(link)
+        """判断后缀是否在黑名单中"""
+        filename = os.path.basename(link)
+        file_extend = self.get_file_extend(filename)
+        is_link = False
+        if link.startswith(('http://', 'https://')) and file_extend not in self.black_extend_list:
+            full_url = link
+        elif link.startswith('javascript:'):
+            return False
+        elif link.startswith('////') and len(link) > 4:
+            full_url = 'http://' + link[2:]
+        elif link.startswith('//') and len(link) > 2:
+            full_url = 'http:' + link
+        elif link.startswith('/'):
+            full_url = parse_url.scheme + '://' + parse_url.netloc + link
+        elif link.startswith('./'):
+            full_url = parse_url.scheme + '://' + parse_url.netloc + parse_url.path + link[1:]
+        else:
+            full_url = parse_url.scheme + '://' + parse_url.netloc + parse_url.path + '/' + link
+        """解析爬取到链接的域名和根域名"""
+        extract_full_url_domain = extract(full_url)
+        root_domain = extract_full_url_domain.domain + '.' + extract_full_url_domain.suffix
+        sub_domain = urlparse(full_url).netloc
+        """判断爬取到的链接是否满足keyword"""
+        in_keyword = False
+        for keyword in self.keywords:
+            if keyword in root_domain:
+                in_keyword = True
+        if not in_keyword:
+            return False
+        """添加根域名"""
+        try:
+            self._value_lock.acquire()
+            if root_domain not in self.root_domains:
+                self.root_domains.append(root_domain)
+                logger.info('[+]Find a new root domain ==> {}'.format(root_domain))
+                if root_domain not in self.extract_urls:
+                    self.extract_urls.append(root_domain)
+                    self.queue.put('http://' + root_domain)
+        finally:
+            self._value_lock.release()
+
+        """添加子域名"""
+        try:
+            self._value_lock.acquire()
+            if sub_domain not in self.sub_domains and sub_domain != root_domain:
+                self.sub_domains.append(sub_domain)
+                logger.info('[+]Find a new subdomain ==> {}'.format(sub_domain))
+                if sub_domain not in self.extract_urls:
+                    self.extract_urls.append(sub_domain)
+                    self.queue.put('http://' + sub_domain)
+        finally:
+            self._value_lock.release()
+        if file_extend in self.black_extend_list:
+            return False
+        if is_link is True:
+            return link
+        try:
+            self._value_lock.acquire()
+            if full_url not in self.apis and file_extend != 'html' and file_extend != 'js':
+                self.apis.append(full_url)
+                # logger.info('[+]Find a new api in {}'.format(parse_url.netloc))
+        finally:
+            self._value_lock.release()
+
+        format_url = self.get_format_url(urlparse(full_url), filename, file_extend)
+
+        try:
+            self._value_lock.acquire()
+            if format_url not in self.extract_urls:
+                self.extract_urls.append(format_url)
+                self.queue.put(full_url)
+        finally:
+            self._value_lock.release()
+
+    def find_leak_info(self, url, text):
+        for k in self.leak_info_patterns.keys():
+            pattern = self.leak_info_patterns[k]
+            if k == 'mail':
+                for netloc in self.root_domains:
+                    mail_pattern = '([-_a-zA-Z0-9\.]{1,64}@%s)' % netloc
+                    self.process_pattern(k, mail_pattern, text, url)
+            else:
+                self.process_pattern(k, pattern, text, url)
+
+    def process_pattern(self, key, pattern, text, url):
+        try:
+            self._value_lock.acquire()
+            matchs = re.findall(pattern, text, re.IGNORECASE)
+            for match in matchs:
+                match_tuple = (key, match, url)
+                if match not in self.leak_infos_match:
+                    self.leak_infos.append(match_tuple)
+                    self.leak_infos_match.append(match)
+                    # logger.info('[+]Find a leak info ==> {}'.format(match_tuple))
+        except Exception as e:
+            logger.warning(e)
+        finally:
+            self._value_lock.release()
+
 
 if __name__ == '__main__':
-	args = parse_args()
-	domain = args.domain
-	domain_file = args.file
-	api_file = args.save
-	save_domainfile = args.savedomain
-	if domain:
-	#domain_netloc = urlparse(domain).netloc
-		if not domain.startswith(('http://','https://')):
-			domain = 'http://' + domain
-		try:
-			domain_netloc = urlparse(domain).netloc
-			domains.append(domain_netloc)
-		except:
-			print('[Error!]Can\'t access to domain：{}'.format(domain))
-		if args.keyword:
-			keywords = args.keyword.split(',')
-		else:
-			keywords = None
-		if keywords is None:
-			if len(domain_netloc.split('.'))>=3:
-				keywords = domain_netloc.split('.')[1:2]
-				#print(domain_netloc.split('.'))
-			elif len(domain_netloc.split('.'))<3:
-				keywords = domain_netloc.split('.')[0:1]
-			keyword_check = input('由于未指定关键字，程序选取关键字为{}，若不正确，请输入你的关键字：'.format(keywords))
-			if  keyword_check :
-				keywords = keyword_check.split(',')
-		#	print(keyword_check)
-		#print(keywords)
-		#return
-		domains.append(domain_netloc)
-		main(domain)
-	elif domain_file:
-		queue_file = Queue()
-		with open(domain_file,'r+') as f:
-			for _ in f:
-				domains.append(_)
-				if not _.startswith(('http://','https://')):
-					_ = 'http://' + _
-				queue_file.put(_.strip())
-		while queue_file.qsize()>0:
-			if activeCount()<=10:
-				domain = queue_file.get()
-				try:
-					domain_netloc = urlparse(domain).netloc
-				except:
-					print('[Error!]Can\'t access to domain：{}'.format(domain))
-				if args.keyword:
-					keywords = args.keyword.split(',')
-				else:
-					keywords = None
-				if keywords is None:
-					if len(domain_netloc.split('.'))>=3:
-						keywords = domain_netloc.split('.')[1:2]
-						#print(domain_netloc.split('.'))
-					elif len(domain_netloc.split('.'))<3:
-						keywords = domain_netloc.split('.')[0:1]
-					if not args.batch:
-						keyword_check = input('由于未指定关键字，程序选取关键字为{}，若不正确，请输入你的关键字：'.format(keywords))
-					if keyword_check:
-						keywords = keyword_check.split(',')
-				#print(keywords)
-				domain_thread = Thread(target=main,args=(domain,))
-				domain_thread.start()
-				domain_thread.join()
-
+    JSINFO().start()

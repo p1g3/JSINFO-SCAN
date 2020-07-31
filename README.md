@@ -80,3 +80,64 @@ python3 jsinfo.py -d jd.com --keyword jd --save jd.api.txt --savedomain jd.domai
 
 ![3Ufg5n.png](https://s2.ax1x.com/2020/02/26/3Ufg5n.png)
 
+2020-8-1：重构代码，具体看下面的README。
+
+#### JSINFO流程图
+
+```bash
+_____  ___    _  _   _  ___    _____ 
+(___  )(  _`\ (_)( ) ( )(  _`\ (  _  )
+    | || (_(_)| || `\| || (_(_)| ( ) |
+ _  | |`\__ \ | || , ` ||  _)  | | | |
+( )_| |( )_) || || |`\ || |    | (_) |
+`\___/'`\____)(_)(_) (_)(_)    (_____)
+        Author：P1g3#p1g3cyx@gmail.com
+```
+
+![jsinfo.jpg](https://i.loli.net/2020/08/01/QRMeW2HABCxVamk.png)
+
+目的：
+
+- 扩充资产（主要体现在爬取根域名这块）
+- 爬取敏感信息（新增了大量敏感信息正则，对邮箱的提取进行了优化）
+- 爬取api（将前面版本中去除的api功能恢复）
+
+##### update
+
+- 新增banner信息
+- 新增敏感信息正则
+- 代码优化
+- 对Ctrl+C退出进行优化（当退出时，会自动将已爬取到的信息保存到当前目录下）
+- 无需自动指定输出结果，最终输出为四个文件，为str(int(time.time()))_xxx（xxx为root_domains、sub_domains、leak_infos、apis）
+- 错误处理优化
+- 减少传入参数
+
+##### Usage
+
+```
+python3 jsinfo.py --target www.baidu.com --keywords baidu
+```
+
+- target（域名 ==> 可传入单个域名或域名文件）
+- keywords（域名中的关键字，用于搜集根域名以及扩充子域名）
+- black_keywords（黑名单关键字，当返回包中含有这些关键字则不再进行二次爬取，用于某些商城页面避免爬到无用链接）
+
+##### 使用效果
+
+![image-20200801011132874.png](https://i.loli.net/2020/08/01/e5rxjcQCFhLBdlU.png)
+
+
+
+阿里的资产还在跑，目前获取到了如下信息：
+
+- 2k+ 子域
+- 80+ 根域
+- 80000+ api
+- 5000+ 敏感信息
+
+PS：欢迎反馈Bug，本项目将持续更新，如有问题请联系wx：p1g3___，如果需要下载历史版本的jsinfo，请从commit中寻找...
+
+##### 部分正则来源
+
+- https://github.com/m4ll0k/SecretFinder/blob/master/SecretFinder.py
+- https://github.com/GerbenJavado/LinkFinder
