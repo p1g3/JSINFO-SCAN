@@ -446,5 +446,9 @@ class JSINFO:
             self._value_lock.release()
 
 
-if __name__ == '__main__':
+def _main():
     JSINFO().start()
+
+
+if __name__ == '__main__':
+    _main()
